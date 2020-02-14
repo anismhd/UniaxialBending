@@ -2,7 +2,34 @@
 Uni-axial Bending Element
 ========================
 
-This is python module for analysis and design of Uni-axial bending elements
+This is python package for analysis and design of Uni-axial bending elements.
+The python module takes inputs in a file format.
+
+[width],[depth]
+# Reinforcement details in the following format
+#	T or B to identify top or bottom reinforcement
+#	Followed by the concrete cover from center of the larger diameter bar
+#	Followed by number of reinforcement bar and it's diameter. 
+#	This entry can be repeated based on number of reinforcement type in a particular layer
+#	Sample - T,0.045,2,0.025
+#	Sample - B,0.045,4,0.025
+CONCRETE,[Grade of Concrete],[Concrete Factor of Safety]
+STEEL,[Yield Strength of Concrete],[Steel Factor of Safety]
+
+The python Package follows sign conversion shown in following figure;
+
+The python package estimate following characters of section;
+
+	1. Estimate maximum neutral axis depth ($x_{u_{max}}$)
+	2. Estimates effective centroid of the section in compression
+	3. Estimate strain distribution for given constrains
+	4. Total sectional force and moment for a given strain distribution
+	5. Estimate distance to neutral axis for a given strain distribution constrains
+	6. Moment capacity of the section in both direction
+	7. Estimate axial capacity of the section
+	8. Estimate moment curvature of the section
+	9. Estimate Axial Force and Moment interaction relation of section
+	10. Beautiful plots of section
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,7 +40,7 @@ FORCE_TOL = 0.001 # Newtons
 
 class Steel:
 	"""
-	Class for steel
+	A BIS Steel material class.
 	"""
 	def __init__(self,fy=500E6,FOS=1.15, Es=2.1E11):
 		self.fy = fy
@@ -37,7 +64,7 @@ class Steel:
 	
 class BISConcrete:
 	"""
-	Class for Concrete
+	BIS concrete material class
 	"""
 	def __init__(self,fck=30E6, FOS = 1.5):
 		self.fck = fck
@@ -65,7 +92,7 @@ class BISConcrete:
 
 class UniaxialBendingSection:
 	"""
-	Class for Uni-axial Bending
+	Class object for Uni-axial Bending
 	"""
 	def __init__(self,inpfile,meshsize=1001):
 		self.inpfile = inpfile
@@ -432,13 +459,15 @@ class UniaxialBendingSection:
 		else:
 			return self.concrete.max_compresive_strain
 
-	def create_interaction_figure(self,fname='sample2.pdf',scale=0.001,):
+	def create_interaction_figure(self,fname='sample2.pdf',scale=0.001,points=None):
 		f,ax=plt.subplots(1,1,figsize=(11.7,8.27))
 		ax.plot(self.axial_moment_interaction['Mu_p']*scale,\
 			self.axial_moment_interaction['Pu_p']*scale)
 		ax.plot(self.axial_moment_interaction['Mu_n']*scale,\
 			self.axial_moment_interaction['Pu_n']*scale)
 		ax.grid(b=True, which='major', color='b', linestyle='--')
+		if points:
+			ax.scatter(points[0],points[1],c='r')
 		ax.axhline(y=0, color='k',lw=0.25)
 		ax.axvline(x=0, color='k',lw=0.25)
 		ax2 = inset_axes(ax,width="20%",height="20%",loc=1)
@@ -477,7 +506,13 @@ class UniaxialBendingSection:
 				else:
 					y = x*0.0 + float(temp[1])
 				ax.scatter(x,y,c='k')
-		ax.axhline(y=self.centroid, c='r', lw=0.25)    
+		ax.axhline(y=self.centroid, c='r', lw=0.25)
+
+	def moment_capacity_Pu(self,Pu):
+		return np.interp(Pu,self.axial_moment_interaction['Pu_p'],\
+			self.axial_moment_interaction['Mu_p']),
+			np.interp(Pu,self.axial_moment_interaction['Pu_n'],\
+			self.axial_moment_interaction['Mu_n'])
 
 	def gen_axial_moment_inter(self,discrete_pnts=1001):
 		"""
@@ -513,6 +548,7 @@ class UniaxialBendingSection:
 			'Pu_p':np.array(Pu_p),'Mu_p':np.array(Mu_p),\
 			'Pu_n':np.array(Pu_n),'Mu_n':np.array(Mu_n)}
 
+"""
 if __name__ == '__main__':
 	import matplotlib.pyplot as plt
 	steel = Steel()
@@ -552,3 +588,4 @@ if __name__ == '__main__':
 	print(section1.sectional_moment(strain,na_z))
 	print(section1.axial_capacity())
 	np.savetxt("strains.csv", OO, delimiter=",")
+"""
