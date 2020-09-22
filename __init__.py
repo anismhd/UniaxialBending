@@ -38,11 +38,47 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 FORCE_TOL = 0.001 # Newtons
 
-class Steel:
+class ASMEConcrete(object):
+	"""docstring for ASMEConcrete"""
+	def __init__(self,fck=30E6, factored=True, primaryOnly=True):
+		self.fck = fck
+		self.max_tensile_strain = 0.0
+		if factored:
+			if primaryOnly:
+				self.max_compresive_strain = self._get_strain(0.75/0.85)
+			else:
+				self.max_compresive_strain = -0.002
+		else:
+			if primaryOnly:
+				self.max_compresive_strain = self._get_strain(0.45/0.85)
+			else:
+				self.max_compresive_strain = self._get_strain(0.60/0.85)
+	def __call__(self, strain):
+		if strain >= 0.0:
+			return 0.0
+		elif strain >= self.max_compresive_strain:
+			strain_c = 2*(abs(strain)/0.002) - (abs(strain)/0.002)**2
+			return -1.0*0.67*strain_c*self.fck
+		else:
+			return 0.0
+	def _get_strain(self,fraction=0.75/0.85):
+		solns = np.roots([1,-2,fraction])
+		if solns[0] < 1.0:
+			return solns[0]*-0.002
+		else:
+			return solns[1]*-0.002
+	def test(self):
+		fID = open('concrete_test.csv','w')
+		fmt = '{0:8.5f} , {1:15.5f}, Pa\n'
+		strain = np.linspace(-0.005,0.005,101)
+		for str in strain:
+			fID.write(fmt.format(str,self(str)))
+		fID.close()
+class ASMESteel:
 	"""
 	A BIS Steel material class.
 	"""
-	def __init__(self,fy=500E6,FOS=1.15, Es=2.1E11):
+	def __init__(self,fy=420E6,FOS=1.1111, Es=2E11):
 		self.fy = fy
 		self.FOS = FOS
 		self.Es = Es
@@ -61,27 +97,83 @@ class Steel:
 		for str in strain:
 			fID.write(fmt.format(str,self(str)))
 		fID.close()
+
+class Steel:
+	"""
+	A BIS Steel material class.
+	Section 1.4.2 of Reinforced Concrete Design to Eurocode 2 by  Michele Win Tai Mak
+
+	"""
+	def __init__(self,fyk=400E6, E0=2.1E11, E1=0.0, Eu_Ey=2):
+		self.fyk = fyk
+		self.E0 = E0
+		self.E1 = E1
+		self.Eyk = fyk/E0
+		self.fuk = fyk + (Eu_Ey*self.Eyk)*self.E1
+		self.Euk =  Eu_Ey*self.Eyk
+
+	def design_parameters(self,FOS=1.15,Euk_Eud_FOS = 1.0):
+		self.fyd = self.fyk/FOS
+		self.Eyd = self.fyd/self.E0
+		self.Eud = self.Euk * Euk_Eud_FOS
+		self.fud = self.fyd + (self.Eud-self.Eyd)*self.E1
+		
+	def __call__(self,strain, design=True):
+		if design:
+			Ey = self.Eyd
+			Eu = self.Euk
+			fy = self.fyd
+		else:
+			Ey = self.Eyk
+			Eu = self.Euk
+			fy = self.fyk
+		if abs(strain) <= Ey:
+			return strain*self.E0
+		elif abs(strain) <= Eu:
+			return np.sign(strain)*(fy + self.E1*(strain-(fy/self.E0)))
+		else:
+			return 0.0
+	def test(self):
+		fID = open('steel_test.csv','w')
+		fmt = '{0:8.5f} , {1:15.5f}, Pa\n'
+		strain = np.linspace(-0.0035,0.0035,101)
+		for str in strain:
+			fID.write(fmt.format(str,self(str)))
+		fID.close()
 	
-class BISConcrete:
+class Concrete:
 	"""
 	BIS concrete material class
 	"""
-	def __init__(self,fck=30E6, FOS = 1.5):
+	def __init__(self,fck=30E6, FOS = 1.5,\
+			max_comp_strain=-0.0035,\
+			max_pur_comp_strain=-0.002):
 		self.fck = fck
 		self.FOS = FOS
 		self.max_tensile_strain = 0.0
-		self.max_compresive_strain = -0.0035
+		self.max_compresive_strain = max_comp_strain
+		self.max_pure_compresive_strain =  max_pur_comp_strain
 		
-	def __call__(self, strain):
+	def __call__(self, strain, newFOS=None):
+		if newFOS:
+			FOS = newFOS
+		else:
+			FOS = self.FOS
 		if strain >= 0.0:
 			return 0.0
 		elif strain >= -0.002:
 			strain_c = 2*(abs(strain)/0.002) - (abs(strain)/0.002)**2
-			return -1.0*0.67*strain_c*self.fck/self.FOS
+			return -1.0*0.67*strain_c*self.fck/FOS
 		elif strain >= -0.0035:
-			return -1.0*0.67*self.fck/self.FOS
+			return -1.0*0.67*self.fck/FOS
 		else:
 			return 0.0
+	def _get_strain(self,fraction=0.75/0.85):
+		solns = np.roots([1,-2,fraction])
+		if solns[0] < 1.0:
+			return solns[0]*-0.002
+		else:
+			return solns[1]*-0.002
 	def test(self):
 		fID = open('concrete_test.csv','w')
 		fmt = '{0:8.5f} , {1:15.5f}, Pa\n'
@@ -113,18 +205,20 @@ class UniaxialBendingSection:
 		"""
 		Class method for estimation of centroid of section for estimation of --
 		"""
-		strain = self.strain_distribution_compr(-0.002,-0.002)
-		self.centroid = (self.depth/2)+\
+		strain = self.strain_distribution_compr(self.max_pure_compresive_strain,\
+			self.max_pure_compresive_strain)
+		self.geometric_centrod = (self.depth/2) 
+		self.plastic_centroid = (self.depth/2)+\
 			(self.sectional_moment(strain, self.depth/2)/\
 			self.sectional_force(strain))
-
+	"""
 	def estimate_balance_moment(self):
 		# Positive balance section
 		self.balance_section = {\
 			'POSITIVE':{'Pu':0.0,'Mu':0.0},\
 			'NEGATIVE':{'Pu':0.0,'Mu':0.0}}
 		strain = self.strain_distribution_capacity(self.max_positive_na,True)
-
+	"""
 	def strain_distribution(self,na_z,phi):
 		"""
 		A class method for finding strain distribution for a give na_z and phi
@@ -135,6 +229,25 @@ class UniaxialBendingSection:
 		:type phi: float
 		"""
 		return (self.mesh_center - na_z)*phi
+	def strain_distribution_asme_capacity(self,depth, positive,\
+			factored=True, primaryOnly=True):
+		if factored:
+			if primaryOnly:
+				max_compresive_strain = self.concrete._get_strain(0.75/0.85)
+			else:
+				max_compresive_strain = -0.002
+		else:
+			if primaryOnly:
+				max_compresive_strain = self.concrete._get_strain(0.45/0.85)
+			else:
+				max_compresive_strain = self.concrete._get_strain(0.60/0.85)
+		if positive:
+			phi = -1*max_compresive_strain/depth
+			na_z = depth
+		else:
+			phi = max_compresive_strain/depth
+			na_z = self.depth - depth
+		return self.strain_distribution(na_z,phi)
 	def strain_distribution_capacity(self, depth, positive):
 		"""
 		A class method for finding strain distribution for a given depth from compressive
@@ -153,7 +266,7 @@ class UniaxialBendingSection:
 			na_z = self.depth - depth
 		return self.strain_distribution(na_z,phi)
 
-	def concrete_stress(self,strain):
+	def concrete_stress(self,strain, newFOS=None):
 		"""
 		A class method for estimating stress distribution in concrete of the section
 
@@ -164,9 +277,9 @@ class UniaxialBendingSection:
 		"""
 		stress = np.zeros(len(strain))
 		for i,strn in enumerate(strain):
-			stress[i] = self.concrete(strn)
+			stress[i] = self.concrete(strn,newFOS)
 		return stress
-	def steel_stress(self,strain_dis):
+	def steel_stress(self,strain_dis, newFOS=None):
 		"""
 		A class method for estimating stress distribution in reinforcing bar in the section
 
@@ -178,9 +291,9 @@ class UniaxialBendingSection:
 		stress = np.zeros(len(self.reinforcement))
 		for i,steel in enumerate(self.reinforcement):
 			strain = np.interp(steel[0], self.mesh_center,strain_dis)
-			stress[i] = (self.steel(strain)-self.concrete(strain))
+			stress[i] = (self.steel(strain,newFOS)-self.concrete(strain,newFOS))
 		return stress
-	def concrete_total_force(self,strain):
+	def concrete_total_force(self,strain, newFOS=None):
 		"""
 		Class method for estimating total force due to concrete section.
 
@@ -189,9 +302,9 @@ class UniaxialBendingSection:
 		:return: Total force due to concrete section
 		:rtype: float
 		"""
-		stress = self.concrete_stress(strain)
+		stress = self.concrete_stress(strain, newFOS)
 		return sum(stress*(self.width*self.mesh_dz))
-	def concrete_total_moment(self,strain,na_z):
+	def concrete_total_moment(self,strain,na_z, newFOS=None):
 		"""
 		Class method for estimating total moment due to concrete section.
 
@@ -202,9 +315,9 @@ class UniaxialBendingSection:
 		:return: Total moment due to concrete section
 		:rtype: float
 		"""
-		force = self.concrete_stress(strain)*(self.width*self.mesh_dz)
+		force = self.concrete_stress(strain, newFOS)*(self.width*self.mesh_dz)
 		return sum(force*(self.mesh_center - na_z))
-	def steel_total_force(self,strain_dis):
+	def steel_total_force(self,strain_dis, newFOS):
 		"""
 		Class method for estimating total force of the section due to reinforcing bars 
 		for a given strain distribution.
@@ -217,7 +330,7 @@ class UniaxialBendingSection:
 		total_force = 0.0
 		for steel in self.reinforcement:
 			strain = np.interp(steel[0], self.mesh_center,strain_dis)
-			force = (self.steel(strain)-self.concrete(strain))*steel[1]
+			force = (self.steel(strain, newFOS)-self.concrete(strain, newFOS))*steel[1]
 			total_force = total_force + force
 		return total_force
 	def steel_total_moment(self,strain_dis,na_z):
@@ -234,6 +347,7 @@ class UniaxialBendingSection:
 	def section_linearization(self,strain):
 		"""
 		Linearizion of stress distribution. As per ASME ??????
+		This method is obsolete. 
 		"""
 		centroidal_axis = self.depth*0.5
 		return self.sectional_force(strain),\
@@ -260,14 +374,17 @@ class UniaxialBendingSection:
 			strain = self.mesh_center*0.0 + str_c
 			Fc = self.concrete_total_force(strain)
 			Fs = self.steel_total_force(strain)
+			print(lb,str_c,ub,(Fc + Fs - Pu)/1000)
 			if abs(Fc + Fs - Pu) <= FORCE_TOL:
 				section_converged = True
 				break
 			else:
 				if (Fc + Fs - Pu) > 0.0:
+					print('Positive')
 					ub = str_c
 					str_c = 0.5*(lb+str_c)
 				else:
+					print('negative')
 					lb = str_c
 					str_c = 0.5*(lb+str_c)
 		if section_converged:
@@ -399,6 +516,8 @@ class UniaxialBendingSection:
 		else:
 			return (self.MomentCapacity['POSITIVE']['Capacity'] if\
 				postive else self.MomentCapacity['NEGATIVE']['Capacity'])
+	def estimate_asme_moment_compacity(self):
+		pass
 	def estimate_moment_capacity(self):
 		na_zp = self.balance_section_capacity(postive=True)
 		phi_p = 0.0035/na_zp
@@ -506,11 +625,11 @@ class UniaxialBendingSection:
 				else:
 					y = x*0.0 + float(temp[1])
 				ax.scatter(x,y,c='k')
-		ax.axhline(y=self.centroid, c='r', lw=0.25)
+		ax.axhline(y=self.geometric_centrod, c='r', lw=0.25)
 
 	def moment_capacity_Pu(self,Pu):
 		return np.interp(Pu,self.axial_moment_interaction['Pu_p'],\
-			self.axial_moment_interaction['Mu_p']),
+			self.axial_moment_interaction['Mu_p']),\
 			np.interp(Pu,self.axial_moment_interaction['Pu_n'],\
 			self.axial_moment_interaction['Mu_n'])
 
@@ -520,8 +639,8 @@ class UniaxialBendingSection:
 		"""
 		Est_p = self.MomentCapacity['POSITIVE']['Est']
 		Est_n = self.MomentCapacity['NEGATIVE']['Est']
-		Est_positive_set = np.linspace(-0.002,Est_p)
-		Est_negative_set = np.linspace(-0.002,Est_n)
+		Est_positive_set = np.linspace(-0.002,Est_p,discrete_pnts)
+		Est_negative_set = np.linspace(-0.002,Est_n,discrete_pnts)
 		Pu_p = []
 		Mu_p = []
 		Pu_n = []
@@ -530,20 +649,20 @@ class UniaxialBendingSection:
 			Es = self.compressive_strain_given_tension(est)
 			strains = self.strain_distribution_compr(Es,est)
 			Pu_p.append(self.sectional_force(strains))
-			Mu_p.append(self.sectional_moment(strains,self.centroid))
+			Mu_p.append(self.sectional_moment(strains,self.geometric_centrod))
 		strains = self.strain_distribution_compr(self.steel.max_tensile_strain,\
 				self.steel.max_tensile_strain)
 		Pu_p.append(self.sectional_force(strains))
-		Mu_p.append(self.sectional_moment(strains,self.centroid))
+		Mu_p.append(self.sectional_moment(strains,self.geometric_centrod))
 		for est in Est_negative_set:
 			Es = self.compressive_strain_given_tension(est)
 			strains = self.strain_distribution_compr(est,Es)
 			Pu_n.append(self.sectional_force(strains))
-			Mu_n.append(self.sectional_moment(strains,self.centroid))
+			Mu_n.append(self.sectional_moment(strains,self.geometric_centrod))
 		strains = self.strain_distribution_compr(self.steel.max_tensile_strain,\
 				self.steel.max_tensile_strain)
 		Pu_n.append(self.sectional_force(strains))
-		Mu_n.append(self.sectional_moment(strains,self.centroid))
+		Mu_n.append(self.sectional_moment(strains,self.geometric_centrod))
 		self.axial_moment_interaction = {\
 			'Pu_p':np.array(Pu_p),'Mu_p':np.array(Mu_p),\
 			'Pu_n':np.array(Pu_n),'Mu_n':np.array(Mu_n)}
