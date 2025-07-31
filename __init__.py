@@ -392,6 +392,8 @@ class UniaxialBendingSection:
 		else:
 			return None
 
+	def 
+
 	def balance_section_capacity(self,postive=True,max_iter=1000):
 		"""
 		Class method for finding balance section for for a given Capacity
@@ -516,7 +518,8 @@ class UniaxialBendingSection:
 		else:
 			return (self.MomentCapacity['POSITIVE']['Capacity'] if\
 				postive else self.MomentCapacity['NEGATIVE']['Capacity'])
-	def estimate_asme_moment_compacity(self):
+
+	def estimate_asme_moment_capacity(self):
 		pass
 	def estimate_moment_capacity(self):
 		na_zp = self.balance_section_capacity(postive=True)
@@ -632,6 +635,11 @@ class UniaxialBendingSection:
 			self.axial_moment_interaction['Mu_p']),\
 			np.interp(Pu,self.axial_moment_interaction['Pu_n'],\
 			self.axial_moment_interaction['Mu_n'])
+	def asme_mo():
+		pass
+
+	def asme_axial_moment_inter():
+		pass
 
 	def gen_axial_moment_inter(self,discrete_pnts=1001):
 		"""
